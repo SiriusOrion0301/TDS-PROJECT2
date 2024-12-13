@@ -183,6 +183,27 @@ def clustering_analysis(df):
     except Exception as e:
         print(f"Error while Clustering: {e}")
         return None,None
+# ... existing code ...
+
+# Adding visualization techniques
+def plot_results(data):
+    """Visualize the results of the analysis."""
+    plt.figure(figsize=(12, 6))
+    sns.barplot(x='category', y='value', data=data)
+    plt.title('Results Overview')
+    plt.xlabel('Category')
+    plt.ylabel('Value')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+# Improving communication
+def print_summary(results):
+    """Print a summary of the results."""
+    for index, result in enumerate(results):
+        print(f"{index + 1}: {result['description']} - Score: {result['score']:.2f}")
+
+
 
 def summarize_correlation(df):
     """Summarize key insights from the correlation matrix."""
@@ -344,21 +365,104 @@ Queries the LLM for insights and returns the response.
         print(f"Error querying AI Proxy: {e}")
         return "Error: Unable to generate narrative."
 
-def create_story(analysis, visualizations_summary):
+def create_anonymized_summary(summary):
     """
-Creates a narrative using LLM based on analysis and visualizations.
+    Create a concise, anonymized summary of the dataset.
+    
+    Args:
+        summary (dict): Original dataset summary
+    
+    Returns:
+        str: Anonymized, high-level summary
     """
-    prompt = (
-        f"### Data Summary:\nShape: {analysis['shape']}\n"
-        f"Columns: {', '.join(list(analysis['columns'].keys()))}\n"
-        f"Missing Values: {str(analysis['missing_values'])}\n\n"
-        f"### Key Summary Statistics:\nTop 3 Columns:\n{pd.DataFrame(analysis['summary_statistics']).iloc[:, :3].to_string()}\n\n"
-        f"### Visualizations:\nCorrelation heatmap, Pairplot, Clustering Scatter Plot.\n\n"
-        "Based on the above, provide a detailed narrative including insights and potential actions."
+    # Extract key, non-sensitive information
+    anonymized_summary = {
+        "total_columns": len(summary.get("columns", [])),
+        "column_types": {
+            col: str(dtype) 
+            for col, dtype in summary.get("types", {}).items()
+        },
+        "missing_values_count": sum(
+            summary.get("missing_values", {}).values()
+        ),
+        "numeric_columns_count": sum(
+            1 for dtype in summary.get("types", {}).values() 
+            if 'int' in str(dtype).lower() or 'float' in str(dtype).lower()
+        ),
+        "categorical_columns_count": sum(
+            1 for dtype in summary.get("types", {}).values() 
+            if 'object' in str(dtype).lower()
+        )
+    }
+    
+    # Convert to a readable string format
+    summary_text = (
+        f"Dataset Overview:\n"
+        f"- Total Columns: {anonymized_summary['total_columns']}\n"
+        f"- Numeric Columns: {anonymized_summary['numeric_columns_count']}\n"
+        f"- Categorical Columns: {anonymized_summary['categorical_columns_count']}\n"
+        f"- Total Missing Values: {anonymized_summary['missing_values_count']}\n"
+        f"Column Types: {json.dumps(anonymized_summary['column_types'], indent=2)}"
+    )
+    
+    return summary_text
+
+def request_llm_insights(summary):
+    """Request insights from LLM based on anonymized summary statistics."""
+    if not configure_openai_api():
+        return "Error: Could not configure API"
+    
+    try:
+        # Create anonymized summary
+        anonymized_summary = create_anonymized_summary(summary)
+        
+        console.log("[cyan]Requesting insights from LLM...")
+        llm_response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a data analysis assistant. Provide high-level, generic insights based on dataset structure."},
+                {"role": "user", "content": f"Analyze this dataset structure and suggest potential analysis approaches:\n{anonymized_summary}"}
+            ]
+        )
+        return llm_response.choices[0].message['content']
+    except Exception as e:
+        console.log(f"[red]Error in requesting LLM insights: {e}")
+        return f"Error in LLM insights: {str(e)}"
+
+def request_story_generation(summary, insights, visual_insights):
+    """Generate a Markdown story with LLM using anonymized data."""
+    if not configure_openai_api():
+        return "Error: Could not configure API"
+    
+    # Create anonymized summary
+    anonymized_summary = create_anonymized_summary(summary)
+    
+    console.log("[cyan]Requesting story generation from LLM...")
+    story_prompt = (
+        f"Generate a concise data analysis report based on this dataset structure:\n"
+        f"{anonymized_summary}\n\n"
+        f"Previous Insights: {insights}\n"
+        f"Visualization Insights: {visual_insights}"
     )
 
-    return query_llm(prompt)
+    try:
+        story_response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a data storytelling assistant. Create a high-level analysis report without revealing specific data."},
+                {"role": "user", "content": story_prompt}
+            ]
+        )
+        return story_response.choices[0].message['content']
+    except Exception as e:
+        console.log(f"[red]Error in requesting story generation: {e}")
+        return f"Error in story generation: {str(e)}"
 
+# Remove or comment out request_visual_insights if not needed
+def request_visual_insights(image_data, description):
+    """Placeholder for visual insights with minimal data exposure."""
+    console.log("[yellow]Visual insights generation is disabled to protect data privacy.")
+    return "Visual insights generation is disabled."
 
 def save_results(analysis, visualizations, story, output_folder):
     readme_path = os.path.join(output_folder, "README.md")
